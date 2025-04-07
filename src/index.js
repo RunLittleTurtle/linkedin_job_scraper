@@ -1,9 +1,10 @@
 import dotenv from "dotenv";
+import cron from "node-cron";
+import UniversalScraper from "./services/universal-scraper.js";
+import DatabaseClient from "./services/database-client.js";
+import { deduplicateItems } from "./utils/deduplication.js";
+
 dotenv.config();
-const cron = require("node-cron");
-const LinkedInScraper = require("./scraper");
-const NocoDBClient = require("./nocodb");
-const { deduplicateJobs } = require("./deduplicate");
 
 /**
  * Get search configurations from NocoDB with fallback to environment variables
@@ -12,10 +13,10 @@ const { deduplicateJobs } = require("./deduplicate");
 async function getSearchConfigurations() {
   try {
     // Initialize NocoDB client
-    const nocodb = new NocoDBClient();
+    const database = new DatabaseClient();
 
     // Try to get configurations from NocoDB first
-    const configs = await nocodb.getSearchConfigurations();
+    const configs = await database.getSearchConfigurations();
 
     if (configs && configs.length > 0) {
       console.log(`Found ${configs.length} search configurations in NocoDB`);
@@ -76,53 +77,63 @@ async function getSearchConfigurations() {
  * Main function to scrape items and store in NocoDB
  */
 async function scrapeAndStoreItems() {
-  console.log("Starting data scraper...");
+  console.log("Starting universal data scraper...");
 
   try {
     // Get search configurations
     const urlsBySource = await getSearchConfigurations();
 
-    // Handle LinkedIn configurations if they exist
-    if (urlsBySource.linkedin && urlsBySource.linkedin.length > 0) {
-      console.log(
-        `Found ${urlsBySource.linkedin.length} LinkedIn configurations to process:`,
-      );
-      urlsBySource.linkedin.forEach((config) => {
-        console.log(`- ${config.name}: ${config.url.substring(0, 50)}...`);
-      });
+    // Initialize the database client
+    const database = new DatabaseClient();
 
-      // Extract just the URLs for scraping
-      const linkedinUrls = urlsBySource.linkedin.map((config) => config.url);
-
-      // Initialize scraper and NocoDB client
-      const scraper = new LinkedInScraper();
-      const nocodb = new NocoDBClient();
-
-      // Scrape items from LinkedIn
-      console.log("Scraping data from LinkedIn...");
-      // Note: still using scrapeJobs to match existing scraper.js implementation
-      const scrapedJobs = await scraper.scrapeJobs(linkedinUrls);
-      console.log(`Scraped ${scrapedJobs.length} items from LinkedIn`);
-
-      // Get existing items from NocoDB
-      const existingJobs = await nocodb.getExistingRecords();
-      console.log(`Found ${existingJobs.length} existing items in NocoDB`);
-
-      // Deduplicate items - still using deduplicateJobs function
-      const newJobs = deduplicateJobs(scrapedJobs, existingJobs);
-      console.log(`Found ${newJobs.length} new items to add to NocoDB`);
-
-      // Insert new items into NocoDB
-      if (newJobs.length > 0) {
-        const insertedJobs = await nocodb.insertRecords(newJobs);
+    // Process each platform's configurations
+    for (const [platform, configs] of Object.entries(urlsBySource)) {
+      if (configs.length > 0) {
         console.log(
-          `Successfully inserted ${insertedJobs.length} new items into NocoDB`,
+          `Found ${configs.length} ${platform} configurations to process:`,
         );
+        configs.forEach((config) => {
+          console.log(`- ${config.name}: ${config.url.substring(0, 50)}...`);
+        });
+
+        // Extract URLs for scraping
+        const urls = configs.map((config) => config.url);
+
+        // Initialize universal scraper
+        const scraper = new UniversalScraper();
+
+        // Add options based on platform type
+        const options = {
+          detailed: true,
+          category: configs[0].category,
+          // Add any platform-specific options here
+        };
+
+        // Scrape items using the universal scraper
+        console.log(`Scraping data from ${platform}...`);
+        const scrapedItems = await scraper.scrapeMultipleUrls(urls, options);
+        console.log(`Scraped ${scrapedItems.length} items from ${platform}`);
+
+        // Get existing items from database
+        const existingItems = await database.getExistingRecords();
+        console.log(`Found ${existingItems.length} existing items in database`);
+
+        // Deduplicate items - update deduplication function name
+        const newItems = deduplicateItems(scrapedItems, existingItems);
+        console.log(`Found ${newItems.length} new items to add to database`);
+
+        // Insert new items into database
+        if (newItems.length > 0) {
+          const insertedItems = await database.insertRecords(newItems);
+          console.log(
+            `Successfully inserted ${insertedItems.length} new items into database`,
+          );
+        } else {
+          console.log("No new items to insert");
+        }
       } else {
-        console.log("No new items to insert");
+        console.log(`No ${platform} configurations found`);
       }
-    } else {
-      console.log("No LinkedIn configurations found");
     }
 
     console.log("Data scraping completed successfully");
@@ -145,7 +156,7 @@ if (process.env.RUN_ON_START === "true") {
   console.log("Scheduler initialized. Data scraper will run at 8:30 AM daily.");
 
   // Run immediately when script is executed directly
-  if (require.main === module) {
+  if (import.meta.url === `file://${process.argv[1]}`) {
     console.log("Script executed directly, running immediately");
     scrapeAndStoreItems();
   }
