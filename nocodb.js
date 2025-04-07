@@ -1,5 +1,6 @@
-const axios = require("axios");
-require("dotenv").config();
+import axios from "axios";
+import dotenv from "dotenv";
+dotenv.config();
 
 class NocoDBClient {
   constructor() {
@@ -84,6 +85,29 @@ class NocoDBClient {
       throw error;
     }
   }
+
+  async getSearchConfigurations() {
+    try {
+      console.log("Fetching search configurations from NocoDB...");
+      const response = await this.client.get(
+        `/api/v1/db/data/noco/${this.projectId}/mhiw0i2upe5zybj/views/vw_mhiw0i2upe5zybj?where=(active,eq,true)`,
+      );
+      console.log(
+        `Retrieved ${response.data.list.length} active search configurations`,
+      );
+      return response.data.list;
+    } catch (error) {
+      console.error(
+        "Error fetching search configurations from NocoDB:",
+        error.message,
+      );
+      if (error.response) {
+        console.error("Response data:", error.response.data);
+        console.error("Response status:", error.response.status);
+      }
+      throw error;
+    }
+  }
 }
 
-module.exports = NocoDBClient;
+export default NocoDBClient;
