@@ -1,10 +1,11 @@
 {
-  "name": "linkedin-job-scraper",
+  "name": "universal-web-scraper",
   "version": "1.0.0",
-  "description": "LinkedIn job scraper that extracts job listings and stores them in NocoDB",
-  "main": "index.js",
+  "description": "Universal web scraper that extracts listings from various platforms and stores them in NocoDB",
+  "main": "src/index.js",
   "scripts": {
-    "start": "node index.js",
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
