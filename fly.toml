@@ -9,7 +9,7 @@ builder = "heroku/builder:22"
 app = "node src/index.js"
 
 [deploy]
-release_command = "npm install"
+release_command = "npm install && npm install nocodb-sdk"
 
 [[vm]]
 memory = "512mb"

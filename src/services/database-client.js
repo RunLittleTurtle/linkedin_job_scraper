@@ -1,26 +1,26 @@
-import axios from "axios";
+import { Api } from "nocodb-sdk";
 import config from "../config/config.js";
 
 class DatabaseClient {
   constructor() {
-    this.apiUrl = config.database.apiUrl;
     this.apiKey = config.database.apiKey;
-    this.projectId = config.database.project;
-    this.tableId = config.database.table;
+    this.tableId = config.database.table || "mxz0oswx9ex4cvn";
     this.configTableId = config.database.configTable || "mhiw0i2upe5zybj";
+    this.configViewId = config.database.configViewId || "vwpv98h8v98d2auw";
+    this.projectId = "p0st31yjjxef052";
 
-    // Initialize axios client with proper logging
-    this.client = axios.create({
-      baseURL: this.apiUrl,
+    // Initialize NocoDB SDK
+    this.api = new Api({
+      baseURL: "https://app.nocodb.com",
       headers: {
-        "xc-auth": this.apiKey,
-        "Content-Type": "application/json",
+        "xc-token": this.apiKey,
       },
-      timeout: 30000,
     });
 
-    console.log(`Database client initialized for project ${this.projectId}`);
-    console.log(`Base URL: ${this.apiUrl} (without sensitive info)`);
+    const apiKeyPreview = this.apiKey
+      ? `${this.apiKey.substring(0, 4)}...${this.apiKey.substring(this.apiKey.length - 4)}`
+      : "null";
+    console.log(`Initialized NocoDB SDK with API key: ${apiKeyPreview}`);
   }
 
   /**
@@ -31,26 +31,26 @@ class DatabaseClient {
   async getSearchConfigurations(activeOnly = true) {
     try {
       console.log(
-        `Fetching search configurations from ${this.configTableId}...`,
+        `Fetching search configurations from table ${this.configTableId}...`,
       );
 
-      // Update this line to use the correct path format
-      const url = `/db/data/noco/${this.projectId}/${this.configTableId}`;
-      console.log(`Making API request to: ${url}`);
-
-      const response = await this.client.get(url);
-
-      const configCount = response.data.list.length;
-      console.log(
-        `Retrieved ${configCount} ${activeOnly ? "active " : ""}search configurations`,
+      // Using SDK's dbViewRow.list method
+      const response = await this.api.dbViewRow.list(
+        "noco",
+        this.projectId,
+        this.configTableId,
+        this.configViewId,
+        {
+          offset: 0,
+          limit: 100,
+          where: activeOnly ? "(active,eq,true)" : "",
+        },
       );
 
-      return response.data.list;
+      console.log(`Retrieved ${response.list.length} search configurations`);
+      return response.list;
     } catch (error) {
-      console.error(
-        "Error fetching search configurations from database:",
-        error.message,
-      );
+      console.error("Error fetching search configurations:", error.message);
       this.logErrorDetails(error);
       return [];
     }
@@ -63,12 +63,31 @@ class DatabaseClient {
   async getExistingRecords() {
     try {
       console.log(`Fetching existing records from ${this.tableId}...`);
-      const response = await this.client.get(
-        `/db/data/noco/${this.projectId}/${this.tableId}/views/vw_${this.tableId}`,
+
+      // Get the view ID for the table
+      const tableViews = await this.api.dbTableView.list(this.tableId);
+
+      const viewId = tableViews[0]?.id;
+      console.log(`Using view ID: ${viewId}`);
+
+      if (!viewId) {
+        throw new Error("Could not find view ID for table");
+      }
+
+      // Using SDK's dbViewRow.list method
+      const response = await this.api.dbViewRow.list(
+        "noco",
+        this.projectId,
+        this.tableId,
+        viewId,
+        {
+          offset: 0,
+          limit: 1000,
+        },
       );
 
-      console.log(`Retrieved ${response.data.list.length} existing records`);
-      return response.data.list;
+      console.log(`Retrieved ${response.list.length} existing records`);
+      return response.list;
     } catch (error) {
       console.error("Error fetching records from database:", error.message);
       this.logErrorDetails(error);
@@ -91,13 +110,32 @@ class DatabaseClient {
       console.log(
         `Inserting ${records.length} records into ${this.tableId}...`,
       );
-      const response = await this.client.post(
-        `/db/data/bulk/noco/${this.projectId}/${this.tableId}`,
-        { list: records },
-      );
 
-      console.log(`Successfully inserted ${response.data.length} records`);
-      return response.data;
+      const insertedRecords = [];
+
+      // Insert each record using SDK's dbTableRow.create method
+      for (let i = 0; i < records.length; i++) {
+        console.log(`Inserting record ${i + 1}/${records.length}...`);
+
+        try {
+          const response = await this.api.dbTableRow.create(
+            this.tableId,
+            records[i],
+          );
+
+          insertedRecords.push(response);
+        } catch (err) {
+          console.error(`Error inserting record ${i + 1}:`, err.message);
+        }
+
+        // Add a small delay between requests
+        if (i < records.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+      }
+
+      console.log(`Successfully inserted ${insertedRecords.length} records`);
+      return insertedRecords;
     } catch (error) {
       console.error("Error inserting records to database:", error.message);
       this.logErrorDetails(error);
