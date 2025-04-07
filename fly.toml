@@ -1,0 +1,10 @@
+app = "linkedin-job-scraper-jobs"
+primary_region = "ams"
+
+[build]
+builder = "heroku/builder:22"
+
+[processes]
+app = "node index.js"
+[deploy]
+release_command = "npm install"
