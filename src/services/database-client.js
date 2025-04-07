@@ -7,96 +7,20 @@ class DatabaseClient {
     this.apiKey = config.database.apiKey;
     this.projectId = config.database.project;
     this.tableId = config.database.table;
-    this.configTableId = process.env.NOCODB_CONFIG_TABLE || "mhiw0i2upe5zybj";
+    this.configTableId = config.database.configTable || "mhiw0i2upe5zybj";
 
-    // Initialize axios client
+    // Initialize axios client with proper logging
     this.client = axios.create({
       baseURL: this.apiUrl,
       headers: {
         "xc-auth": this.apiKey,
         "Content-Type": "application/json",
       },
-      timeout: 30000, // 30 second timeout
+      timeout: 30000,
     });
-  }
 
-  /**
-   * Get existing records from the database
-   * @param {Object} options - Query options
-   * @param {number} options.limit - Maximum number of records to retrieve
-   * @param {string} options.where - WHERE clause for filtering
-   * @returns {Promise<Array>} - List of records
-   */
-  async getExistingRecords(options = {}) {
-    try {
-      const limit = options.limit || 1000;
-      const whereClause = options.where ? `&where=${options.where}` : "";
-
-      console.log(
-        `Fetching existing records from database (limit: ${limit})...`,
-      );
-      const response = await this.client.get(
-        `/api/v1/db/data/noco/${this.projectId}/${this.tableId}/views/vw_${this.tableId}?limit=${limit}${whereClause}`,
-      );
-
-      console.log(`Retrieved ${response.data.list.length} existing records`);
-      return response.data.list;
-    } catch (error) {
-      console.error("Error fetching records from database:", error.message);
-      this.logErrorDetails(error);
-      return [];
-    }
-  }
-
-  /**
-   * Insert new records into the database
-   * @param {Array} records - Records to insert
-   * @param {number} batchSize - Number of records per batch
-   * @returns {Promise<Array>} - Inserted records
-   */
-  async insertRecords(records, batchSize = 20) {
-    if (!records || records.length === 0) {
-      console.log("No new records to insert");
-      return [];
-    }
-
-    try {
-      // Process in batches
-      const batches = [];
-      for (let i = 0; i < records.length; i += batchSize) {
-        batches.push(records.slice(i, i + batchSize));
-      }
-
-      console.log(
-        `Inserting ${records.length} records in ${batches.length} batches`,
-      );
-
-      const insertedRecords = [];
-      for (const [index, batch] of batches.entries()) {
-        console.log(
-          `Processing batch ${index + 1}/${batches.length} (${batch.length} records)`,
-        );
-
-        const response = await this.client.post(
-          `/api/v1/db/data/bulk/noco/${this.projectId}/${this.tableId}`,
-          { list: batch },
-        );
-
-        insertedRecords.push(...response.data);
-
-        // Add a small delay between batches to avoid overwhelming the API
-        if (index < batches.length - 1) {
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-        }
-      }
-
-      console.log(`Successfully inserted ${insertedRecords.length} records`);
-      return insertedRecords;
-    } catch (error) {
-      console.error("Error inserting records to database:", error.message);
-      this.logErrorDetails(error);
-      return [];
-    }
+    console.log(`Database client initialized for project ${this.projectId}`);
+    console.log(`Base URL: ${this.apiUrl} (without sensitive info)`);
   }
 
   /**
@@ -106,11 +30,13 @@ class DatabaseClient {
    */
   async getSearchConfigurations(activeOnly = true) {
     try {
-      console.log("Fetching search configurations from database...");
+      console.log(
+        `Fetching search configurations from ${this.configTableId}...`,
+      );
       const whereClause = activeOnly ? "?where=(active,eq,true)" : "";
 
       const response = await this.client.get(
-        `/api/v1/db/data/noco/${this.projectId}/${this.configTableId}/views/vw_${this.configTableId}${whereClause}`,
+        `/db/data/noco/${this.projectId}/${this.configTableId}/views/vw_${this.configTableId}${whereClause}`,
       );
 
       const configCount = response.data.list.length;
@@ -130,25 +56,51 @@ class DatabaseClient {
   }
 
   /**
-   * Update a record in the database
-   * @param {string} recordId - ID of the record to update
-   * @param {Object} data - Updated data
-   * @returns {Promise<Object>} - Updated record
+   * Get existing records from the database
+   * @returns {Promise<Array>} - List of records
    */
-  async updateRecord(recordId, data) {
+  async getExistingRecords() {
     try {
-      console.log(`Updating record ${recordId} in database...`);
-      const response = await this.client.patch(
-        `/api/v1/db/data/noco/${this.projectId}/${this.tableId}/${recordId}`,
-        data,
+      console.log(`Fetching existing records from ${this.tableId}...`);
+      const response = await this.client.get(
+        `/db/data/noco/${this.projectId}/${this.tableId}/views/vw_${this.tableId}`,
       );
 
-      console.log(`Successfully updated record ${recordId}`);
+      console.log(`Retrieved ${response.data.list.length} existing records`);
+      return response.data.list;
+    } catch (error) {
+      console.error("Error fetching records from database:", error.message);
+      this.logErrorDetails(error);
+      return [];
+    }
+  }
+
+  /**
+   * Insert new records into the database
+   * @param {Array} records - Records to insert
+   * @returns {Promise<Array>} - Inserted records
+   */
+  async insertRecords(records) {
+    if (!records || records.length === 0) {
+      console.log("No new records to insert");
+      return [];
+    }
+
+    try {
+      console.log(
+        `Inserting ${records.length} records into ${this.tableId}...`,
+      );
+      const response = await this.client.post(
+        `/db/data/bulk/noco/${this.projectId}/${this.tableId}`,
+        { list: records },
+      );
+
+      console.log(`Successfully inserted ${response.data.length} records`);
       return response.data;
     } catch (error) {
-      console.error(`Error updating record ${recordId}:`, error.message);
+      console.error("Error inserting records to database:", error.message);
       this.logErrorDetails(error);
-      return null;
+      return [];
     }
   }
 

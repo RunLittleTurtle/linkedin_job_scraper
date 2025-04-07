@@ -1,6 +1,7 @@
 {
   "name": "universal-web-scraper",
   "version": "1.0.0",
+  "type": "module",
   "description": "Universal web scraper that extracts listings from various platforms and stores them in NocoDB",
   "main": "src/index.js",
   "scripts": {

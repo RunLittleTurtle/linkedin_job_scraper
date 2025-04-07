@@ -4,6 +4,34 @@ import UniversalScraper from "./services/universal-scraper.js";
 import DatabaseClient from "./services/database-client.js";
 import { deduplicateItems } from "./utils/deduplication.js";
 
+import http from "http";
+
+// Create HTTP server to keep the app running and allow manual triggers
+const server = http.createServer((req, res) => {
+  if (req.url === "/run-scraper") {
+    console.log("Manual trigger received, starting scraper...");
+
+    // Run the scraper asynchronously
+    scrapeAndStoreItems().catch((err) => {
+      console.error("Error running scraper from manual trigger:", err);
+    });
+
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("Scraper started! Check logs for progress.");
+  } else {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end(
+      "Universal Web Scraper is running. Visit /run-scraper to trigger scraping manually.",
+    );
+  }
+});
+
+// Start the server (add this before your other code)
+const PORT = process.env.PORT || 8080;
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
+
 dotenv.config();
 
 /**
