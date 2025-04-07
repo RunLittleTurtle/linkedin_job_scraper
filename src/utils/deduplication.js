@@ -20,4 +20,4 @@ function deduplicateJobs(scrapedJobs, existingJobs) {
   return newJobs;
 }
 
-module.exports = { deduplicateJobs };
+export { deduplicateJobs };

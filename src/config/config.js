@@ -1,4 +1,5 @@
-require("dotenv").config();
+import dotenv from "dotenv";
+dotenv.config();
 
 const config = {
   database: {
@@ -11,6 +12,8 @@ const config = {
     maxItemsPerUrl: parseInt(process.env.MAX_ITEMS_PER_URL || "200"),
     totalItemsLimit: parseInt(process.env.TOTAL_ITEMS_LIMIT || "600"),
     concurrencyLimit: parseInt(process.env.CONCURRENCY_LIMIT || "3"),
+    retryAttempts: parseInt(process.env.RETRY_ATTEMPTS || "3"),
+    requestTimeout: parseInt(process.env.REQUEST_TIMEOUT || "30000"),
   },
   scheduler: {
     cronExpression: process.env.CRON_EXPRESSION || "30 8 * * *",
@@ -18,4 +21,4 @@ const config = {
   },
 };
 
-module.exports = config;
+export default config;
