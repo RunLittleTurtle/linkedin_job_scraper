@@ -33,11 +33,12 @@ class DatabaseClient {
       console.log(
         `Fetching search configurations from ${this.configTableId}...`,
       );
-      const whereClause = activeOnly ? "?where=(active,eq,true)" : "";
 
-      const response = await this.client.get(
-        `/db/data/noco/${this.projectId}/${this.configTableId}/views/vw_${this.configTableId}${whereClause}`,
-      );
+      // Update this line to use the correct path format
+      const url = `/db/data/noco/${this.projectId}/${this.configTableId}`;
+      console.log(`Making API request to: ${url}`);
+
+      const response = await this.client.get(url);
 
       const configCount = response.data.list.length;
       console.log(

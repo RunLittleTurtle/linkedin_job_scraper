@@ -1,37 +1,12 @@
+// Imports at the top
 import dotenv from "dotenv";
 import cron from "node-cron";
+import http from "http";
 import UniversalScraper from "./services/universal-scraper.js";
 import DatabaseClient from "./services/database-client.js";
 import { deduplicateItems } from "./utils/deduplication.js";
 
-import http from "http";
-
-// Create HTTP server to keep the app running and allow manual triggers
-const server = http.createServer((req, res) => {
-  if (req.url === "/run-scraper") {
-    console.log("Manual trigger received, starting scraper...");
-
-    // Run the scraper asynchronously
-    scrapeAndStoreItems().catch((err) => {
-      console.error("Error running scraper from manual trigger:", err);
-    });
-
-    res.writeHead(200, { "Content-Type": "text/plain" });
-    res.end("Scraper started! Check logs for progress.");
-  } else {
-    res.writeHead(200, { "Content-Type": "text/plain" });
-    res.end(
-      "Universal Web Scraper is running. Visit /run-scraper to trigger scraping manually.",
-    );
-  }
-});
-
-// Start the server (add this before your other code)
-const PORT = process.env.PORT || 8080;
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
-
+// Load environment variables first
 dotenv.config();
 
 /**
@@ -146,7 +121,7 @@ async function scrapeAndStoreItems() {
         const existingItems = await database.getExistingRecords();
         console.log(`Found ${existingItems.length} existing items in database`);
 
-        // Deduplicate items - update deduplication function name
+        // Deduplicate items
         const newItems = deduplicateItems(scrapedItems, existingItems);
         console.log(`Found ${newItems.length} new items to add to database`);
 
@@ -170,6 +145,32 @@ async function scrapeAndStoreItems() {
   }
 }
 
+// Create HTTP server to keep the app running and allow manual triggers
+const server = http.createServer((req, res) => {
+  if (req.url === "/run-scraper") {
+    console.log("Manual trigger received, starting scraper...");
+
+    // Run the scraper asynchronously
+    scrapeAndStoreItems().catch((err) => {
+      console.error("Error running scraper from manual trigger:", err);
+    });
+
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("Scraper started! Check logs for progress.");
+  } else {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end(
+      "Universal Web Scraper is running. Visit /run-scraper to trigger scraping manually.",
+    );
+  }
+});
+
+// Start the server
+const PORT = process.env.PORT || 8080;
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
+
 // If using scheduled execution through Fly.io Machines
 if (process.env.RUN_ON_START === "true") {
   console.log("Running scraper on startup as specified by RUN_ON_START");
@@ -189,3 +190,6 @@ if (process.env.RUN_ON_START === "true") {
     scrapeAndStoreItems();
   }
 }
+
+// Export function for terminal execution
+export { scrapeAndStoreItems };
