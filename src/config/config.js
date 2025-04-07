@@ -5,8 +5,11 @@ const config = {
   database: {
     apiUrl: process.env.NOCODB_API_URL,
     apiKey: process.env.NOCODB_API_KEY,
-    project: process.env.NOCODB_PROJECT,
-    table: process.env.NOCODB_TABLE,
+    project: process.env.NOCODB_PROJECT || "p0st31yjjxef052",
+    table: process.env.NOCODB_TABLE || "mxz0oswx9ex4cvn",
+    configTable: process.env.NOCODB_CONFIG_TABLE || "mhiw0i2upe5zybj",
+    configViewId: process.env.NOCODB_CONFIG_VIEW_ID || "vwpv98h8v98d2auw",
+    resultsViewId: process.env.NOCODB_RESULTS_VIEW_ID || "vww8pja5jm99sk0m",
   },
   scraper: {
     maxItemsPerUrl: parseInt(process.env.MAX_ITEMS_PER_URL || "200"),

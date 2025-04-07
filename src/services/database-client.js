@@ -4,10 +4,17 @@ import config from "../config/config.js";
 class DatabaseClient {
   constructor() {
     this.apiKey = config.database.apiKey;
-    this.tableId = config.database.table || "mxz0oswx9ex4cvn";
+
+    // Project ID
+    this.projectId = "p0st31yjjxef052";
+
+    // Config table details
     this.configTableId = config.database.configTable || "mhiw0i2upe5zybj";
     this.configViewId = config.database.configViewId || "vwpv98h8v98d2auw";
-    this.projectId = "p0st31yjjxef052";
+
+    // Results table details
+    this.resultsTableId = config.database.table || "mxz0oswx9ex4cvn";
+    this.resultsViewId = config.database.resultsViewId || "vww8pja5jm99sk0m";
 
     // Initialize NocoDB SDK
     this.api = new Api({
@@ -21,6 +28,13 @@ class DatabaseClient {
       ? `${this.apiKey.substring(0, 4)}...${this.apiKey.substring(this.apiKey.length - 4)}`
       : "null";
     console.log(`Initialized NocoDB SDK with API key: ${apiKeyPreview}`);
+    console.log(`Project ID: ${this.projectId}`);
+    console.log(
+      `Config Table: ${this.configTableId} (View: ${this.configViewId})`,
+    );
+    console.log(
+      `Results Table: ${this.resultsTableId} (View: ${this.resultsViewId})`,
+    );
   }
 
   /**
@@ -30,11 +44,9 @@ class DatabaseClient {
    */
   async getSearchConfigurations(activeOnly = true) {
     try {
-      console.log(
-        `Fetching search configurations from table ${this.configTableId}...`,
-      );
+      console.log(`Fetching search configurations...`);
 
-      // Using SDK's dbViewRow.list method
+      // Using SDK's dbViewRow.list method with config table and view
       const response = await this.api.dbViewRow.list(
         "noco",
         this.projectId,
@@ -62,24 +74,14 @@ class DatabaseClient {
    */
   async getExistingRecords() {
     try {
-      console.log(`Fetching existing records from ${this.tableId}...`);
+      console.log(`Fetching existing scraped results...`);
 
-      // Get the view ID for the table
-      const tableViews = await this.api.dbTableView.list(this.tableId);
-
-      const viewId = tableViews[0]?.id;
-      console.log(`Using view ID: ${viewId}`);
-
-      if (!viewId) {
-        throw new Error("Could not find view ID for table");
-      }
-
-      // Using SDK's dbViewRow.list method
+      // Using SDK's dbViewRow.list method with results table and view
       const response = await this.api.dbViewRow.list(
         "noco",
         this.projectId,
-        this.tableId,
-        viewId,
+        this.resultsTableId,
+        this.resultsViewId,
         {
           offset: 0,
           limit: 1000,
@@ -107,9 +109,7 @@ class DatabaseClient {
     }
 
     try {
-      console.log(
-        `Inserting ${records.length} records into ${this.tableId}...`,
-      );
+      console.log(`Inserting ${records.length} records into results table...`);
 
       const insertedRecords = [];
 
@@ -119,13 +119,14 @@ class DatabaseClient {
 
         try {
           const response = await this.api.dbTableRow.create(
-            this.tableId,
+            this.resultsTableId,
             records[i],
           );
 
           insertedRecords.push(response);
         } catch (err) {
           console.error(`Error inserting record ${i + 1}:`, err.message);
+          this.logErrorDetails(err);
         }
 
         // Add a small delay between requests

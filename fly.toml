@@ -3,24 +3,20 @@ primary_region = "ams"
 
 [build]
 builder = "heroku/builder:22"
+build_command = "npm run fly:build"
 
-# Define the process
 [processes]
 app = "node src/index.js"
-
-[deploy]
-release_command = "npm install && npm install nocodb-sdk"
 
 [[vm]]
 memory = "512mb"
 cpu_kind = "shared"
 cpus = 1
 
-# Update this section to specify the process
 [http_service]
 internal_port = 8080
 force_https = true
 auto_stop_machines = "off"
 auto_start_machines = true
 min_machines_running = 1
-processes = ["app"]        # This line is missing in your current config
+processes = ["app"]
