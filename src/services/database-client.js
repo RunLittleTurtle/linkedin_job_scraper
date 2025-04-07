@@ -1,52 +1,68 @@
 import axios from "axios";
-import dotenv from "dotenv";
-dotenv.config();
+import config from "../config/config.js";
 
-class NocoDBClient {
+class DatabaseClient {
   constructor() {
-    this.apiUrl = process.env.NOCODB_API_URL;
-    this.apiKey = process.env.NOCODB_API_KEY;
-    this.projectId = process.env.NOCODB_PROJECT;
-    this.tableId = process.env.NOCODB_TABLE;
+    this.apiUrl = config.database.apiUrl;
+    this.apiKey = config.database.apiKey;
+    this.projectId = config.database.project;
+    this.tableId = config.database.table;
+    this.configTableId = process.env.NOCODB_CONFIG_TABLE || "mhiw0i2upe5zybj";
 
+    // Initialize axios client
     this.client = axios.create({
       baseURL: this.apiUrl,
       headers: {
         "xc-auth": this.apiKey,
         "Content-Type": "application/json",
       },
+      timeout: 30000, // 30 second timeout
     });
   }
 
-  async getExistingRecords() {
+  /**
+   * Get existing records from the database
+   * @param {Object} options - Query options
+   * @param {number} options.limit - Maximum number of records to retrieve
+   * @param {string} options.where - WHERE clause for filtering
+   * @returns {Promise<Array>} - List of records
+   */
+  async getExistingRecords(options = {}) {
     try {
-      console.log("Fetching existing records from NocoDB...");
-      const response = await this.client.get(
-        `/api/v1/db/data/noco/${this.projectId}/${this.tableId}/views/vw_${this.tableId}?limit=1000`,
+      const limit = options.limit || 1000;
+      const whereClause = options.where ? `&where=${options.where}` : "";
+
+      console.log(
+        `Fetching existing records from database (limit: ${limit})...`,
       );
+      const response = await this.client.get(
+        `/api/v1/db/data/noco/${this.projectId}/${this.tableId}/views/vw_${this.tableId}?limit=${limit}${whereClause}`,
+      );
+
       console.log(`Retrieved ${response.data.list.length} existing records`);
       return response.data.list;
     } catch (error) {
-      console.error("Error fetching records from NocoDB:", error.message);
-      if (error.response) {
-        console.error("Response data:", error.response.data);
-        console.error("Response status:", error.response.status);
-      }
-      throw error;
+      console.error("Error fetching records from database:", error.message);
+      this.logErrorDetails(error);
+      return [];
     }
   }
 
-  async insertRecords(records) {
+  /**
+   * Insert new records into the database
+   * @param {Array} records - Records to insert
+   * @param {number} batchSize - Number of records per batch
+   * @returns {Promise<Array>} - Inserted records
+   */
+  async insertRecords(records, batchSize = 20) {
     if (!records || records.length === 0) {
       console.log("No new records to insert");
       return [];
     }
 
     try {
-      // Process in batches of 20
-      const batchSize = 20;
+      // Process in batches
       const batches = [];
-
       for (let i = 0; i < records.length; i += batchSize) {
         batches.push(records.slice(i, i + batchSize));
       }
@@ -77,37 +93,78 @@ class NocoDBClient {
       console.log(`Successfully inserted ${insertedRecords.length} records`);
       return insertedRecords;
     } catch (error) {
-      console.error("Error inserting records to NocoDB:", error.message);
-      if (error.response) {
-        console.error("Response data:", error.response.data);
-        console.error("Response status:", error.response.status);
-      }
-      throw error;
+      console.error("Error inserting records to database:", error.message);
+      this.logErrorDetails(error);
+      return [];
     }
   }
 
-  async getSearchConfigurations() {
+  /**
+   * Get search configurations from the database
+   * @param {boolean} activeOnly - Whether to retrieve only active configurations
+   * @returns {Promise<Array>} - List of search configurations
+   */
+  async getSearchConfigurations(activeOnly = true) {
     try {
-      console.log("Fetching search configurations from NocoDB...");
+      console.log("Fetching search configurations from database...");
+      const whereClause = activeOnly ? "?where=(active,eq,true)" : "";
+
       const response = await this.client.get(
-        `/api/v1/db/data/noco/${this.projectId}/mhiw0i2upe5zybj/views/vw_mhiw0i2upe5zybj?where=(active,eq,true)`,
+        `/api/v1/db/data/noco/${this.projectId}/${this.configTableId}/views/vw_${this.configTableId}${whereClause}`,
       );
+
+      const configCount = response.data.list.length;
       console.log(
-        `Retrieved ${response.data.list.length} active search configurations`,
+        `Retrieved ${configCount} ${activeOnly ? "active " : ""}search configurations`,
       );
+
       return response.data.list;
     } catch (error) {
       console.error(
-        "Error fetching search configurations from NocoDB:",
+        "Error fetching search configurations from database:",
         error.message,
       );
-      if (error.response) {
-        console.error("Response data:", error.response.data);
-        console.error("Response status:", error.response.status);
-      }
-      throw error;
+      this.logErrorDetails(error);
+      return [];
+    }
+  }
+
+  /**
+   * Update a record in the database
+   * @param {string} recordId - ID of the record to update
+   * @param {Object} data - Updated data
+   * @returns {Promise<Object>} - Updated record
+   */
+  async updateRecord(recordId, data) {
+    try {
+      console.log(`Updating record ${recordId} in database...`);
+      const response = await this.client.patch(
+        `/api/v1/db/data/noco/${this.projectId}/${this.tableId}/${recordId}`,
+        data,
+      );
+
+      console.log(`Successfully updated record ${recordId}`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error updating record ${recordId}:`, error.message);
+      this.logErrorDetails(error);
+      return null;
+    }
+  }
+
+  /**
+   * Helper method to log error details
+   * @param {Error} error - Error object
+   * @private
+   */
+  logErrorDetails(error) {
+    if (error.response) {
+      console.error("Response data:", error.response.data);
+      console.error("Response status:", error.response.status);
+    } else if (error.request) {
+      console.error("No response received");
     }
   }
 }
 
-export default NocoDBClient;
+export default DatabaseClient;

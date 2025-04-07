@@ -1,10 +1,37 @@
-app = "linkedin-job-scraper-jobs"
+app = "universal-web-scraper-jobs"
 primary_region = "ams"
 
 [build]
 builder = "heroku/builder:22"
 
 [processes]
-app = "node index.js"
+app = "node src/index.js"
+
 [deploy]
 release_command = "npm install"
+
+[[vm]]
+memory = "512mb"
+cpu_kind = "shared"
+cpus = 1
+
+[[services]]
+internal_port = 8080
+force_https = true
+processes = ["app"]
+auto_stop_machines = false
+auto_start_machines = true
+min_machines_running = 1
+
+[[services.ports]]
+port = 80
+handlers = ["http"]
+
+[[services.ports]]
+port = 443
+handlers = ["tls", "http"]
+
+[services.concurrency]
+type = "connections"
+soft_limit = 20
+hard_limit = 25

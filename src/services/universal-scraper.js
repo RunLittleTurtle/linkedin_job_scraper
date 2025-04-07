@@ -1,13 +1,35 @@
-const { chromium } = require("playwright");
-const UserAgent = require("user-agents");
-const pLimit = require("p-limit");
-require("dotenv").config();
+import { chromium } from "playwright";
+import UserAgent from "user-agents";
+import pLimit from "p-limit";
+import config from "../config/config.js";
 
-class LinkedInScraper {
+/**
+ * Universal web scraper for extracting data from various platforms
+ */
+class UniversalScraper {
   constructor() {
-    this.maxJobsPerUrl = parseInt(process.env.MAX_JOBS_PER_URL || "200");
-    this.totalJobsLimit = parseInt(process.env.TOTAL_JOBS_LIMIT || "600");
-    this.concurrencyLimit = parseInt(process.env.CONCURRENCY_LIMIT || "3");
+    this.maxItemsPerUrl = config.scraper.maxItemsPerUrl;
+    this.totalItemsLimit = config.scraper.totalItemsLimit;
+    this.concurrencyLimit = config.scraper.concurrencyLimit;
+    this.retryAttempts = config.scraper.retryAttempts || 3;
+    this.requestTimeout = config.scraper.requestTimeout || 30000;
+    this.browser = null;
+    this.context = null;
+
+    // Platform detection patterns
+    this.platformPatterns = {
+      linkedin: {
+        urlPattern: /linkedin\.com/i,
+        listingSelector: ".job-search-card",
+        detailsPath: (id) => `/jobs/view/${id}`,
+      },
+      indeed: {
+        urlPattern: /indeed\.com/i,
+        listingSelector: ".jobCard",
+        detailsPath: (id) => `/viewjob?jk=${id}`,
+      },
+      // Add more platforms as needed
+    };
   }
 
   /**
@@ -47,28 +69,28 @@ class LinkedInScraper {
   }
 
   /**
-   * Extract job ID from LinkedIn job URL or entity URN
-   * @param {string} urlOrUrn - LinkedIn job URL or entity URN
-   * @returns {string} - Job ID
+   * Detect which platform a URL belongs to
+   * @param {string} url - URL to analyze
+   * @returns {string|null} - Platform name or null if not detected
    */
-  extractJobId(urlOrUrn) {
-    if (urlOrUrn.includes("urn:li:jobPosting:")) {
-      // Extract from URN format: "urn:li:jobPosting:3544610012"
-      return urlOrUrn.split(":").pop();
-    } else if (urlOrUrn.includes("/jobs/view/")) {
-      // Extract from URL format: "https://www.linkedin.com/jobs/view/3544610012"
-      const match = urlOrUrn.match(/\/jobs\/view\/(\d+)/);
-      return match ? match[1] : null;
+  detectPlatform(url) {
+    for (const [platform, { urlPattern }] of Object.entries(
+      this.platformPatterns,
+    )) {
+      if (urlPattern.test(url)) {
+        return platform;
+      }
     }
     return null;
   }
 
   /**
-   * Scroll to load more job cards
+   * Scroll to load more content on a page
    * @param {Page} page - Playwright page object
+   * @param {string} platform - Platform name
    */
-  async scrollToLoadMoreJobs(page) {
-    console.log("Scrolling to load more jobs...");
+  async scrollToLoadMore(page, platform) {
+    console.log("Scrolling to load more content...");
 
     let previousHeight = 0;
     let scrollAttempts = 0;
@@ -87,22 +109,40 @@ class LinkedInScraper {
       const currentHeight = await page.evaluate(
         () => document.body.scrollHeight,
       );
+
       if (currentHeight === previousHeight) {
-        // Try clicking "Show more" button if it exists
-        const showMoreButton = page.locator(
-          "button.infinite-scroller__show-more-button",
-        );
-        if (
-          (await showMoreButton.count()) > 0 &&
-          (await showMoreButton.isVisible())
-        ) {
-          console.log('Clicking "Show more" button');
-          await showMoreButton.click();
-          await this.randomDelay();
-        } else {
-          console.log("Reached the end of the job listings");
-          break;
+        // Platform-specific "load more" buttons
+        if (platform === "linkedin") {
+          const showMoreButton = page.locator(
+            "button.infinite-scroller__show-more-button",
+          );
+          if (
+            (await showMoreButton.count()) > 0 &&
+            (await showMoreButton.isVisible())
+          ) {
+            console.log('Clicking "Show more" button');
+            await showMoreButton.click();
+            await this.randomDelay();
+            continue;
+          }
+        } else if (platform === "indeed") {
+          const showMoreButton = page.locator(
+            "[data-testid='pagination-page-next']",
+          );
+          if (
+            (await showMoreButton.count()) > 0 &&
+            (await showMoreButton.isVisible())
+          ) {
+            console.log('Clicking "Next page" button');
+            await showMoreButton.click();
+            await this.randomDelay(3000, 5000);
+            continue;
+          }
         }
+        // Add other platform-specific "load more" handling here
+
+        console.log("Reached the end of the listings");
+        break;
       }
 
       previousHeight = currentHeight;
@@ -113,25 +153,26 @@ class LinkedInScraper {
   }
 
   /**
-   * Extract basic job data from job card on search results page
-   * @param {ElementHandle} jobCard - Playwright element handle for job card
-   * @returns {Object} - Basic job data
+   * Extract basic data from a LinkedIn job card
+   * @param {ElementHandle} card - Playwright element handle for card
+   * @param {Object} options - Scraping options
+   * @returns {Object} - Basic item data
    */
-  async extractBasicJobData(jobCard) {
+  async extractLinkedInBasicData(card, options = {}) {
     try {
       // Extract job ID and URL
-      const jobLinkElement = await jobCard.$(".job-search-card__link");
-      const jobUrl = await jobLinkElement.getAttribute("href");
-      const jobId = this.extractJobId(jobUrl);
+      const linkElement = await card.$(".job-search-card__link");
+      const itemUrl = await linkElement.getAttribute("href");
+      const itemId = this.extractLinkedInId(itemUrl);
 
       // Extract job title
-      const jobTitle = await jobLinkElement.innerText();
+      const title = await linkElement.innerText();
 
       // Extract company name and URL
-      const companyElement = await jobCard.$(".job-search-card__company-name");
+      const companyElement = await card.$(".job-search-card__company-name");
       const companyName = await companyElement.innerText();
 
-      const companyLinkElement = await jobCard.$(
+      const companyLinkElement = await card.$(
         ".job-search-card__company-name a",
       );
       const companyUrl = companyLinkElement
@@ -139,60 +180,99 @@ class LinkedInScraper {
         : null;
 
       // Extract location
-      const locationElement = await jobCard.$(".job-search-card__location");
+      const locationElement = await card.$(".job-search-card__location");
       const location = await locationElement.innerText();
 
       // Extract posted time
-      const postedTimeElement = await jobCard.$("time");
+      const postedTimeElement = await card.$("time");
       const postedTime = await postedTimeElement.innerText();
       const publishedAt = await postedTimeElement.getAttribute("datetime");
 
+      // Return data in standardized structure
       return {
-        jobId,
-        jobTitle,
-        jobUrl,
-        companyName,
-        companyUrl,
-        location,
-        postedTime,
-        publishedAt,
-        applyUrl: jobUrl,
+        // Core universal fields
+        id: itemId,
+        title: title,
+        url: itemUrl,
+        description: "", // Will be filled in detailed view
+        location: location,
+        publishedAt: publishedAt,
+        scrapedAt: new Date().toISOString(),
+
+        // Source metadata
+        source: {
+          platform: "linkedin",
+          type: "job",
+          category: options.category || "",
+        },
+
+        // Organization information
+        organization: {
+          name: companyName,
+          url: companyUrl,
+          id: "",
+        },
+
+        // Platform-specific details (will be populated in detailed view)
+        details: {
+          postedTime: postedTime,
+        },
       };
     } catch (error) {
-      console.error("Error extracting basic job data:", error);
+      console.error("Error extracting LinkedIn basic data:", error);
       return null;
     }
   }
 
   /**
-   * Extract detailed job data from job detail page
-   * @param {Object} basicJobData - Basic job data extracted from job card
-   * @returns {Object} - Complete job data
+   * Extract ID from a LinkedIn URL or entity URN
+   * @param {string} urlOrUrn - LinkedIn URL or entity URN
+   * @returns {string} - Item ID
    */
-  async extractDetailedJobData(basicJobData) {
+  extractLinkedInId(urlOrUrn) {
+    if (urlOrUrn.includes("urn:li:jobPosting:")) {
+      // Extract from URN format: "urn:li:jobPosting:3544610012"
+      return urlOrUrn.split(":").pop();
+    } else if (urlOrUrn.includes("/jobs/view/")) {
+      // Extract from URL format: "https://www.linkedin.com/jobs/view/3544610012"
+      const match = urlOrUrn.match(/\/jobs\/view\/(\d+)/);
+      return match ? match[1] : null;
+    }
+    return null;
+  }
+
+  /**
+   * Extract detailed data from LinkedIn job detail page
+   * @param {Object} basicData - Basic data extracted from card
+   * @returns {Object} - Complete item data
+   */
+  async extractLinkedInDetailedData(basicData) {
     console.log(
-      `Extracting detailed data for job: ${basicJobData.jobId} - ${basicJobData.jobTitle}`,
+      `Extracting detailed data for LinkedIn job: ${basicData.id} - ${basicData.title}`,
     );
 
     let page = null;
     try {
       page = await this.context.newPage();
 
-      // Navigate to job detail page
-      await page.goto(basicJobData.jobUrl, { waitUntil: "networkidle" });
+      // Navigate to detail page
+      await page.goto(basicData.url, {
+        waitUntil: "networkidle",
+        timeout: this.requestTimeout,
+      });
       await this.randomDelay(1000, 3000);
 
-      // Extract job description
+      // Extract description
       const descriptionElement = await page.$(".description__text");
-      const jobDescription = descriptionElement
+      const description = descriptionElement
         ? await descriptionElement.innerText()
         : "";
 
-      // Extract job criteria items
+      // Extract job-specific details
       const criteriaItems = await page.$$(".job-criteria-item");
       let contractType = "";
       let experienceLevel = "";
-      let sector = "";
+      let industry = "";
       let workType = "";
 
       for (const item of criteriaItems) {
@@ -209,9 +289,7 @@ class LinkedInScraper {
         } else if (headerText.includes("Employment type")) {
           contractType = valueText;
         } else if (headerText.includes("Industry")) {
-          sector = valueText;
-        } else if (headerText.includes("Job function")) {
-          // Can be used for additional categorization
+          industry = valueText;
         }
       }
 
@@ -229,43 +307,11 @@ class LinkedInScraper {
         }
       }
 
-      // Extract application count if available
+      // Extract other LinkedIn-specific fields
       let applicationsCount = "";
       const applicationsElement = await page.$(".num-applicants__caption");
       if (applicationsElement) {
         applicationsCount = await applicationsElement.innerText();
-      }
-
-      // Extract company ID if available
-      let companyId = "";
-      if (basicJobData.companyUrl) {
-        const companyUrlMatch =
-          basicJobData.companyUrl.match(/\/company\/([^\/]+)/);
-        companyId = companyUrlMatch ? companyUrlMatch[1] : "";
-      }
-
-      // Extract apply button type
-      let applyType = "";
-      if (await page.$(".jobs-apply-button--top-card")) {
-        applyType = "EASY_APPLY";
-      } else if (
-        await page.$(
-          'a[data-tracking-control-name="public_jobs_apply-link-offsite_sign_in"]',
-        )
-      ) {
-        applyType = "EXTERNAL_APPLY";
-      }
-
-      // Extract poster information if available
-      let posterFullName = "";
-      let posterProfileUrl = "";
-      const posterElement = await page.$(".jobs-poster__name");
-      if (posterElement) {
-        posterFullName = await posterElement.innerText();
-        const posterLink = await posterElement.$("a");
-        if (posterLink) {
-          posterProfileUrl = await posterLink.getAttribute("href");
-        }
       }
 
       // Extract salary information if available
@@ -277,131 +323,181 @@ class LinkedInScraper {
         salary = await salaryElement.innerText();
       }
 
-      // Extract benefits if available
-      let benefits = "";
-      const benefitsElements = await page.$$(".jobs-benefits__list-item");
-      if (benefitsElements.length > 0) {
-        const benefitsList = [];
-        for (const benefit of benefitsElements) {
-          benefitsList.push(await benefit.innerText());
-        }
-        benefits = benefitsList.join(", ");
+      // Extract company ID if available
+      let companyId = "";
+      if (basicData.organization.url) {
+        const companyUrlMatch =
+          basicData.organization.url.match(/\/company\/([^\/]+)/);
+        companyId = companyUrlMatch ? companyUrlMatch[1] : "";
       }
 
       await page.close();
 
-      // Combine basic and detailed job data
+      // Return enhanced data with the same structure, adding description and details
       return {
-        ...basicJobData,
-        jobDescription,
-        applicationsCount,
-        contractType,
-        experienceLevel,
-        workType,
-        sector,
-        salary,
-        posterFullName,
-        posterProfileUrl,
-        companyId,
-        applyType,
-        benefits,
+        ...basicData,
+        description: description,
+        organization: {
+          ...basicData.organization,
+          id: companyId,
+        },
+        details: {
+          ...basicData.details,
+          contractType: contractType,
+          experienceLevel: experienceLevel,
+          workType: workType,
+          industry: industry,
+          applicationsCount: applicationsCount,
+          salary: salary,
+        },
       };
     } catch (error) {
       console.error(
-        `Error extracting detailed job data for job ${basicJobData.jobId}:`,
+        `Error extracting detailed data for item ${basicData.id}:`,
         error,
       );
       if (page) await page.close();
 
-      // Return basic job data without details on error
-      return basicJobData;
+      // Return basic data without details on error
+      return basicData;
     }
   }
 
   /**
-   * Scrape jobs from a single LinkedIn search URL
-   * @param {string} url - LinkedIn search URL
-   * @returns {Array} - Array of job data
+   * Extract basic data from a card based on platform
+   * @param {ElementHandle} card - Playwright element handle for card
+   * @param {string} platform - Platform name
+   * @param {Object} options - Scraping options
+   * @returns {Promise<Object>} - Basic item data
    */
-  async scrapeJobsFromUrl(url) {
-    console.log(`Starting to scrape jobs from URL: ${url}`);
+  async extractBasicData(card, platform, options = {}) {
+    switch (platform) {
+      case "linkedin":
+        return this.extractLinkedInBasicData(card, options);
+      // Add cases for other platforms
+      default:
+        console.warn(`No extractor defined for platform: ${platform}`);
+        return null;
+    }
+  }
+
+  /**
+   * Extract detailed data based on platform
+   * @param {Object} basicData - Basic data with platform field
+   * @returns {Promise<Object>} - Detailed item data
+   */
+  async extractDetailedData(basicData) {
+    const platform = basicData.source.platform;
+    switch (platform) {
+      case "linkedin":
+        return this.extractLinkedInDetailedData(basicData);
+      // Add cases for other platforms
+      default:
+        console.warn(`No detailed extractor defined for platform: ${platform}`);
+        return basicData;
+    }
+  }
+
+  /**
+   * Scrape items from a single URL
+   * @param {string} url - Search URL
+   * @param {Object} options - Scraping options
+   * @returns {Array} - Array of item data
+   */
+  async scrapeFromUrl(url, options = {}) {
+    const platform = this.detectPlatform(url);
+    if (!platform) {
+      console.error(`Unsupported platform for URL: ${url}`);
+      return [];
+    }
+
+    console.log(`Starting to scrape ${platform} data from URL: ${url}`);
 
     const page = await this.context.newPage();
-    const jobs = [];
+    const items = [];
 
     try {
-      // Navigate to the LinkedIn search URL
-      await page.goto(url, { waitUntil: "networkidle" });
-      console.log("Page loaded, waiting for job cards to appear...");
+      // Navigate to the search URL
+      await page.goto(url, {
+        waitUntil: "networkidle",
+        timeout: this.requestTimeout,
+      });
+      console.log(`Page loaded, waiting for ${platform} items to appear...`);
 
-      // Wait for job cards to load
-      await page.waitForSelector(".job-search-card", { timeout: 30000 });
+      // Wait for items to load
+      const listingSelector = this.platformPatterns[platform].listingSelector;
+      await page.waitForSelector(listingSelector, { timeout: 30000 });
 
-      // Scroll to load more job cards
-      await this.scrollToLoadMoreJobs(page);
+      // Scroll to load more items
+      await this.scrollToLoadMore(page, platform);
 
-      // Extract all job cards
-      const jobCards = await page.$$(".job-search-card");
-      console.log(`Found ${jobCards.length} job cards`);
+      // Extract all item cards
+      const cards = await page.$$(listingSelector);
+      console.log(`Found ${cards.length} items`);
 
-      // Limit to max jobs per URL
-      const jobCardsToProcess = jobCards.slice(0, this.maxJobsPerUrl);
+      // Limit to max items per URL
+      const cardsToProcess = cards.slice(0, this.maxItemsPerUrl);
 
-      // Extract basic job data from each card
-      const basicJobsData = [];
-      for (const jobCard of jobCardsToProcess) {
-        const basicJobData = await this.extractBasicJobData(jobCard);
-        if (basicJobData) {
-          basicJobsData.push(basicJobData);
+      // Extract basic data from each card
+      const basicItemsData = [];
+      for (const card of cardsToProcess) {
+        const basicData = await this.extractBasicData(card, platform, options);
+        if (basicData) {
+          basicItemsData.push(basicData);
         }
       }
 
-      console.log(`Extracted basic data for ${basicJobsData.length} jobs`);
+      console.log(`Extracted basic data for ${basicItemsData.length} items`);
 
-      // Process detailed job data with concurrency limit
-      const limit = pLimit(this.concurrencyLimit);
-      const detailedJobsPromises = basicJobsData.map((basicJobData) =>
-        limit(() => this.extractDetailedJobData(basicJobData)),
-      );
+      // Extract detailed data with concurrency limit if detailed option is true
+      if (options.detailed !== false) {
+        const limit = pLimit(this.concurrencyLimit);
+        const detailedItemsPromises = basicItemsData.map((basicData) =>
+          limit(() => this.extractDetailedData(basicData)),
+        );
 
-      const detailedJobs = await Promise.all(detailedJobsPromises);
-      jobs.push(...detailedJobs.filter(Boolean));
+        const detailedItems = await Promise.all(detailedItemsPromises);
+        items.push(...detailedItems.filter(Boolean));
+      } else {
+        items.push(...basicItemsData);
+      }
 
-      console.log(`Successfully scraped ${jobs.length} jobs from URL`);
+      console.log(`Successfully scraped ${items.length} items from URL`);
     } catch (error) {
-      console.error("Error scraping jobs from URL:", error);
+      console.error(`Error scraping from URL (${platform}):`, error);
     } finally {
       await page.close();
     }
 
-    return jobs;
+    return items;
   }
 
   /**
-   * Scrape jobs from multiple LinkedIn search URLs
-   * @param {Array} urls - Array of LinkedIn search URLs
-   * @returns {Array} - Array of job data
+   * Scrape items from multiple URLs
+   * @param {Array} urls - Array of URLs to scrape
+   * @param {Object} options - Scraping options
+   * @returns {Array} - Array of item data
    */
-  async scrapeJobs(urls) {
-    console.log(`Starting to scrape jobs from ${urls.length} URLs`);
+  async scrapeMultipleUrls(urls, options = {}) {
+    console.log(`Starting to scrape ${urls.length} URLs`);
 
     // Initialize browser if not already initialized
     if (!this.browser) {
       await this.initBrowser();
     }
 
-    let allJobs = [];
+    let allItems = [];
 
     try {
       // Process each URL sequentially to avoid detection
       for (const url of urls) {
-        const jobs = await this.scrapeJobsFromUrl(url);
-        allJobs.push(...jobs);
+        const items = await this.scrapeFromUrl(url, options);
+        allItems.push(...items);
 
-        // Check if we've reached the total jobs limit
-        if (allJobs.length >= this.totalJobsLimit) {
-          console.log(`Reached total jobs limit of ${this.totalJobsLimit}`);
-          allJobs = allJobs.slice(0, this.totalJobsLimit);
+        // Check if we've reached the total items limit
+        if (allItems.length >= this.totalItemsLimit) {
+          console.log(`Reached total items limit of ${this.totalItemsLimit}`);
+          allItems = allItems.slice(0, this.totalItemsLimit);
           break;
         }
 
@@ -419,9 +515,9 @@ class LinkedInScraper {
       }
     }
 
-    console.log(`Scraped a total of ${allJobs.length} jobs`);
-    return allJobs;
+    console.log(`Scraped a total of ${allItems.length} items`);
+    return allItems;
   }
 }
 
-module.exports = LinkedInScraper;
+export default UniversalScraper;
