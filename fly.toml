@@ -4,6 +4,7 @@ primary_region = "ams"
 [build]
 builder = "heroku/builder:22"
 
+# Define the process
 [processes]
 app = "node src/index.js"
 
@@ -15,9 +16,11 @@ memory = "512mb"
 cpu_kind = "shared"
 cpus = 1
 
+# Update this section to specify the process
 [http_service]
 internal_port = 8080
 force_https = true
 auto_stop_machines = "off"
 auto_start_machines = true
 min_machines_running = 1
+processes = ["app"]        # This line is missing in your current config
