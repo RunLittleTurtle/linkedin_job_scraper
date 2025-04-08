@@ -3,8 +3,6 @@ primary_region = "ams"
 
 [build]
 builder = "heroku/builder:22"
-build_command = "npm run fly:build"
-
 [processes]
 app = "node src/index.js"
 
